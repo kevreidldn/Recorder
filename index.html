@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Transcriber">
+<title>Voice Transcriber</title>
+<style>
+  :root {
+    --bg: #0a0a0a; --surface: #141414; --surface2: #1e1e1e;
+    --border: rgba(255,255,255,0.08); --text: #f0f0f0; --muted: #666;
+    --accent: #0a84ff; --safe-top: env(safe-area-inset-top,20px); --safe-bottom: env(safe-area-inset-bottom,20px);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, 'SF Pro Display', sans-serif; }
+  body { display: flex; flex-direction: column; padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); }
+  header { padding: 16px 24px 8px; display: flex; align-items: center; justify-content: space-between; }
+  header h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
+  .transcript-box {
+    flex: 1; margin: 12px 16px; background: var(--surface);
+    border: 0.5px solid var(--border); border-radius: 16px;
+    padding: 16px; font-size: 17px; line-height: 1.6;
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    color: var(--text); min-height: 200px;
+  }
+  .transcript-box .interim { color: var(--muted); }
+  .placeholder { color: var(--muted); font-size: 15px; }
+  .bottom { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .rec-btn {
+    width: 72px; height: 72px; border-radius: 50%; border: 3px solid var(--accent);
+    background: transparent; cursor: pointer; margin: 0 auto;
+    display: flex; align-items: center; justify-content: center; transition: transform 0.12s;
+  }
+  .rec-btn:active { transform: scale(0.93); }
+  .rec-btn .inner { width: 30px; height: 30px; border-radius: 50%; background: var(--accent); transition: border-radius 0.2s, width 0.2s, height 0.2s; }
+  .rec-btn.recording .inner { border-radius: 6px; width: 24px; height: 24px; }
+  .rec-btn.recording { background: rgba(10,132,255,0.15); }
+  .status { text-align: center; font-size: 13px; color: var(--muted); min-height: 18px; }
+  .status.live { color: var(--accent); }
+  .action-btns { display: flex; gap: 10px; }
+  .act-btn {
+    flex: 1; padding: 12px; border-radius: 12px; border: none;
+    background: var(--surface2); color: var(--text); font-size: 14px;
+    cursor: pointer; transition: opacity 0.12s;
+  }
+  .act-btn:active { opacity: 0.6; }
+  .act-btn:disabled { opacity: 0.3; }
+  .err-banner {
+    margin: 0 16px 8px; padding: 12px 16px; border-radius: 12px;
+    background: rgba(255,59,48,0.12); border: 0.5px solid rgba(255,59,48,0.3);
+    font-size: 13px; color: #ff6b63; display: none;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Transcriber</h1>
+  <span id="wordCount" style="font-size:13px;color:var(--muted)">0 words</span>
+</header>
+
+<div class="transcript-box" id="transcriptBox">
+  <span class="placeholder" id="placeholder">Tap the button and start speaking…</span>
+  <span id="finalText"></span>
+  <span class="interim" id="interimText"></span>
+</div>
+
+<div class="err-banner" id="errBanner">Speech recognition isn't supported in this browser. Please use Safari on iOS.</div>
+
+<div class="bottom">
+  <div class="status" id="statusLabel">Tap to start</div>
+  <button class="rec-btn" id="recBtn" onclick="toggleRecording()">
+    <div class="inner"></div>
+  </button>
+  <div class="action-btns">
+    <button class="act-btn" id="copyBtn" onclick="copyText()" disabled>📋 Copy</button>
+    <button class="act-btn" id="clearBtn" onclick="clearText()" disabled>✕ Clear</button>
+  </div>
+</div>
+
+<script>
+let recognition = null, isRecording = false, finalTranscript = '';
+
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+if (!SpeechRecognition) {
+  document.getElementById('errBanner').style.display = 'block';
+  document.getElementById('recBtn').disabled = true;
+} else {
+  recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'en-GB';
+
+  recognition.onresult = e => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) {
+        finalTranscript += e.results[i][0].transcript + ' ';
+      } else {
+        interim += e.results[i][0].transcript;
+      }
+    }
+    document.getElementById('placeholder').style.display = 'none';
+    document.getElementById('finalText').textContent = finalTranscript;
+    document.getElementById('interimText').textContent = interim;
+    updateWordCount();
+    updateButtons();
+    // Auto scroll
+    const box = document.getElementById('transcriptBox');
+    box.scrollTop = box.scrollHeight;
+  };
+
+  recognition.onerror = e => {
+    if (e.error === 'not-allowed') {
+      document.getElementById('errBanner').textContent = 'Microphone access denied. Please allow it in Settings > Safari.';
+      document.getElementById('errBanner').style.display = 'block';
+    }
+    stopRecording();
+  };
+
+  recognition.onend = () => {
+    if (isRecording) recognition.start(); // keep going
+  };
+}
+
+function toggleRecording() {
+  if (!recognition) return;
+  isRecording ? stopRecording() : startRecording();
+}
+
+function startRecording() {
+  recognition.start();
+  isRecording = true;
+  document.getElementById('recBtn').classList.add('recording');
+  document.getElementById('statusLabel').textContent = 'Listening…';
+  document.getElementById('statusLabel').className = 'status live';
+}
+
+function stopRecording() {
+  recognition.stop();
+  isRecording = false;
+  document.getElementById('recBtn').classList.remove('recording');
+  document.getElementById('statusLabel').textContent = 'Tap to start';
+  document.getElementById('statusLabel').className = 'status';
+  document.getElementById('interimText').textContent = '';
+}
+
+function copyText() {
+  navigator.clipboard.writeText(finalTranscript.trim()).then(() => {
+    document.getElementById('copyBtn').textContent = '✓ Copied!';
+    setTimeout(() => document.getElementById('copyBtn').textContent = '📋 Copy', 2000);
+  });
+}
+
+function clearText() {
+  finalTranscript = '';
+  document.getElementById('finalText').textContent = '';
+  document.getElementById('interimText').textContent = '';
+  document.getElementById('placeholder').style.display = 'inline';
+  updateWordCount();
+  updateButtons();
+}
+
+function updateWordCount() {
+  const words = finalTranscript.trim().split(/\s+/).filter(w => w).length;
+  document.getElementById('wordCount').textContent = words + (words === 1 ? ' word' : ' words');
+}
+
+function updateButtons() {
+  const hasText = finalTranscript.trim().length > 0;
+  document.getElementById('copyBtn').disabled = !hasText;
+  document.getElementById('clearBtn').disabled = !hasText;
+}
+</script>
+</body>
+</html>
